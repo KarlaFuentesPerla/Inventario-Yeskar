@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tallercito — Inventario y entregas",
-  description: "Controla los productos y agenda las entregas de tu emprendimiento en un solo lugar.",
+  title: "Tallercito — Productos y entregas",
+  description: "Administra productos, ventas, ganancias y entregas desde un calendario sencillo.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
