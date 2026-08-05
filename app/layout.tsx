@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tallercito — Productos y entregas",
-  description: "Administra productos, ventas, ganancias y entregas desde un calendario sencillo.",
+  title: "Variedades YesKar — Productos y entregas",
+  description: "Yesi administra productos, ventas, ganancias y entregas desde un calendario sencillo.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
