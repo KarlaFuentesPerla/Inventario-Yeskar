@@ -67,7 +67,7 @@ export default function Home(){
     <header className="topbar"><div className="brand-mark">Y</div><div><span className="eyebrow">MI EMPRENDIMIENTO</span><h1>Variedades YesKar</h1></div></header>
     <div className="content">
       {tab==="inicio"&&<>
-        <section className="welcome"><div className="welcome-copy"><p>{fullDate(isoDate(now))}</p><h2>¡Hola, Yesi!</h2><span>Aquí tienes lo más importante de hoy.</span></div><img className="mascot" src="/images/yeskar-elephant.png" alt="Elefantita, mascota de Variedades YesKar"/></section>
+        <section className="welcome"><div className="welcome-copy"><p>{fullDate(isoDate(now))}</p><h2>¡Hola, Yesi!</h2><span>Aquí tienes lo más importante de hoy.</span></div><img className="mascot" src="/images/yeskar-elephant-v2.png" alt="Elefantito con mochila, mascota de Variedades YesKar"/></section>
         <section className="section-title"><h2>Resumen de ventas</h2><p>Calculado con los productos marcados como vendidos.</p></section>
         <div className="money-grid"><article><span>Dinero recogido</span><strong>{money(revenue)}</strong></article><article><span>Dinero gastado</span><strong>{money(invested)}</strong></article><article className="profit"><span>Ganancia total</span><strong>{money(profit)}</strong></article></div>
         <div className="home-actions"><button onClick={()=>{setEditing(null);setModal("product")}}><b>＋</b><span><strong>Agregar producto</strong><small>Registrar un artículo nuevo</small></span></button><button onClick={()=>openDelivery(isoDate(now))}><b>＋</b><span><strong>Agendar entrega</strong><small>Crear una cita en el calendario</small></span></button></div>
