@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/purity -- IDs and timestamps are intentionally created inside user event handlers. */
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
 type SaleType = "General" | "Familia";
@@ -40,11 +40,23 @@ export default function Home(){
   const [businessId,setBusinessId]=useState<string|null>(null);
   const [authReady,setAuthReady]=useState(false);
   const [cloudReady,setCloudReady]=useState(false);
+  const activeUserId=useRef<string|null>(null);
 
   useEffect(()=>{
-    supabase.auth.getSession().then(({data})=>{setUserId(data.session?.user.id??null);setAuthReady(true)});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{setUserId(session?.user.id??null);setBusinessId(null);setCloudReady(false);if(!session){setProducts([]);setCategories([]);setReservations([]);setDeliveries([])}setAuthReady(true)});
-    return()=>subscription.unsubscribe();
+    let active=true;
+    const applySession=(nextUserId:string|null)=>{
+      if(!active)return;
+      setAuthReady(true);
+      if(activeUserId.current===nextUserId)return;
+      activeUserId.current=nextUserId;
+      setUserId(nextUserId);
+      setBusinessId(null);
+      setCloudReady(false);
+      if(!nextUserId){setProducts([]);setCategories([]);setReservations([]);setDeliveries([])}
+    };
+    void supabase.auth.getSession().then(({data})=>applySession(data.session?.user.id??null));
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>applySession(session?.user.id??null));
+    return()=>{active=false;subscription.unsubscribe()};
   },[]);
 
   useEffect(()=>{
@@ -54,10 +66,10 @@ export default function Home(){
       setCloudReady(false);
       const {data:existingBusiness,error:businessError}=await supabase.from("businesses").select("id").maybeSingle();
       let business=existingBusiness;
-      if(businessError){setToast("No se pudo abrir el negocio");return}
+      if(businessError){setToast("No se pudo actualizar el inventario");setCloudReady(true);return}
       if(!business){
         const created=await supabase.from("businesses").insert({name:"Variedades YesKar",entrepreneur_name:"Yesi"}).select("id").single();
-        if(created.error){setToast("No se pudo crear el negocio");return}
+        if(created.error){setToast("No se pudo crear el negocio");setCloudReady(true);return}
         business=created.data;
       }
       const id=business.id as string;
@@ -68,6 +80,7 @@ export default function Home(){
         supabase.from("deliveries").select("id,client_id,reservation_id,client_name,client_phone,address,shipping_mode,scheduled_for,company_handoff_at,shipping_company,remuneration_amount,collected_at,remuneration_withdrawn_at").eq("business_id",id).in("status",["programada","recogida"])
       ]);
       if(cancelled)return;
+      if(categoryResult.error||productResult.error||reservationResult.error||deliveryResult.error){setToast("No se pudo actualizar el inventario");setCloudReady(true);return}
       const categoryRows=categoryResult.data??[],productRows=productResult.data??[],reservationRows=reservationResult.data??[],deliveryRows=deliveryResult.data??[];
       const categoryNameById=new Map(categoryRows.map(c=>[c.id,c.name]));
       const productClientByDbId=new Map(productRows.map(p=>[p.id,Number(p.client_id)]));

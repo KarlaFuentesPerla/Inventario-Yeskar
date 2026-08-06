@@ -33,6 +33,8 @@ test("keeps cloud persistence and mobile-first controls in the source", async ()
   assert.match(client, /createClient/);
   assert.match(client, /persistSession:\s*true/);
   assert.match(page, /supabase\.auth\.signInWithPassword/);
+  assert.match(page, /activeUserId\.current===nextUserId/);
+  assert.doesNotMatch(page, /onAuthStateChange\([^)]*=>\{setUserId\(session\?\.user\.id\?\?null\);setBusinessId\(null\);setCloudReady\(false\)/);
   assert.match(page, /supabase\.from\("products"\)\.upsert/);
   assert.match(page, /supabase\.from\("categories"\)/);
   assert.match(page, /supabase\.from\("reservations"\)\.upsert/);
