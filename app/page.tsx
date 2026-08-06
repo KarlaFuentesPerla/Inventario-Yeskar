@@ -45,6 +45,7 @@ export default function Home(){
   useEffect(()=>{const raw=localStorage.getItem("tallercito-v2");if(raw){try{const d=JSON.parse(raw);const migratedReservations:Reservation[]=d.reservations??[];const loaded:Product[]=d.products.map((p:Product)=>{const quantity=p.quantity??1;const wasSold=p.status==="Vendido";if(p.status==="Reservado"&&!migratedReservations.some(r=>r.productId===p.id))migratedReservations.push({id:Date.now()+p.id,productId:p.id,quantity,saleType:"General",createdAt:isoDate(now)});return{...p,quantity,soldQuantity:p.soldQuantity??(wasSold?quantity:0),salesRevenue:p.salesRevenue??(wasSold?(p.soldPrice??p.publicPrice)*quantity:0)}});setProducts(loaded);setReservations(migratedReservations);setDeliveries(d.deliveries);setCategories(d.categories??Array.from(new Set(loaded.map(p=>p.category))))}catch{}}},[]);
   useEffect(()=>{localStorage.setItem("tallercito-v2",JSON.stringify({products,deliveries,categories,reservations}))},[products,deliveries,categories,reservations]);
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(""),2800);return()=>clearTimeout(t)},[toast]);
+  useEffect(()=>{if(!modal)return;const t=setTimeout(()=>{document.querySelectorAll<HTMLInputElement>('input[name="quantity"]').forEach(input=>{input.value=""})},0);return()=>clearTimeout(t)},[modal,editing,selected]);
 
   const upcoming=deliveries.filter(d=>d.date>=isoDate(now)).sort((a,b)=>`${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
   const filtered=products.filter(p=>`${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
