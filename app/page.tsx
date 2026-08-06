@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { supabase } from "./supabase";
 
 type SaleType = "General" | "Familia";
 type Product = { id:number; name:string; category:string; quantity:number; cost:number; publicPrice:number; familyPrice:number; soldQuantity:number; salesRevenue:number; status?:string; saleType?:SaleType; soldPrice?:number };
@@ -33,9 +34,75 @@ export default function Home(){
   const [toast,setToast]=useState("");
   const [selectedDate,setSelectedDate]=useState(isoDate(now));
   const [month,setMonth]=useState(new Date(now.getFullYear(),now.getMonth(),1));
+  const [userId,setUserId]=useState<string|null>(null);
+  const [businessId,setBusinessId]=useState<string|null>(null);
+  const [authReady,setAuthReady]=useState(false);
+  const [cloudReady,setCloudReady]=useState(false);
 
-  useEffect(()=>{const raw=localStorage.getItem("tallercito-v2");if(raw){try{const d=JSON.parse(raw);const migratedReservations:Reservation[]=d.reservations??[];const loaded:Product[]=d.products.map((p:Product)=>{const quantity=p.quantity??1;const wasSold=p.status==="Vendido";if(p.status==="Reservado"&&!migratedReservations.some(r=>r.productId===p.id))migratedReservations.push({id:Date.now()+p.id,productId:p.id,quantity,saleType:"General",createdAt:isoDate(now)});return{...p,quantity,soldQuantity:p.soldQuantity??(wasSold?quantity:0),salesRevenue:p.salesRevenue??(wasSold?(p.soldPrice??p.publicPrice)*quantity:0)}});setProducts(loaded);setReservations(migratedReservations);setDeliveries(d.deliveries);setCategories(d.categories??Array.from(new Set(loaded.map(p=>p.category))))}catch{}}},[]);
-  useEffect(()=>{localStorage.setItem("tallercito-v2",JSON.stringify({products,deliveries,categories,reservations}))},[products,deliveries,categories,reservations]);
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data})=>{setUserId(data.session?.user.id??null);setAuthReady(true)});
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{setUserId(session?.user.id??null);setBusinessId(null);setCloudReady(false);setAuthReady(true)});
+    return()=>subscription.unsubscribe();
+  },[]);
+
+  useEffect(()=>{
+    if(!userId){setProducts([]);setCategories([]);setReservations([]);setDeliveries([]);return}
+    let cancelled=false;
+    async function loadCloudData(){
+      setCloudReady(false);
+      let {data:business,error:businessError}=await supabase.from("businesses").select("id").maybeSingle();
+      if(businessError){setToast("No se pudo abrir el negocio");return}
+      if(!business){
+        const created=await supabase.from("businesses").insert({name:"Variedades YesKar",entrepreneur_name:"Yesi"}).select("id").single();
+        if(created.error){setToast("No se pudo crear el negocio");return}
+        business=created.data;
+      }
+      const id=business.id as string;
+      const [categoryResult,productResult,reservationResult,deliveryResult]=await Promise.all([
+        supabase.from("categories").select("id,name").eq("business_id",id).eq("is_active",true).order("name"),
+        supabase.from("products").select("id,client_id,category_id,name,quantity_on_hand,purchase_price,general_sale_price,family_sale_price").eq("business_id",id).eq("is_active",true).order("created_at",{ascending:false}),
+        supabase.from("reservations").select("id,client_id,product_id,quantity,customer_type,reserved_at").eq("business_id",id).eq("status","reservada"),
+        supabase.from("deliveries").select("id,client_id,reservation_id,client_name,client_phone,address,shipping_mode,scheduled_for,company_handoff_at,shipping_company,remuneration_amount,collected_at,remuneration_withdrawn_at").eq("business_id",id)
+      ]);
+      if(cancelled)return;
+      const categoryRows=categoryResult.data??[],productRows=productResult.data??[],reservationRows=reservationResult.data??[],deliveryRows=deliveryResult.data??[];
+      const categoryNameById=new Map(categoryRows.map(c=>[c.id,c.name]));
+      const productClientByDbId=new Map(productRows.map(p=>[p.id,Number(p.client_id)]));
+      const reservationClientByDbId=new Map(reservationRows.map(r=>[r.id,Number(r.client_id)]));
+      const loadedProducts:Product[]=productRows.map(p=>({id:Number(p.client_id),name:p.name,category:categoryNameById.get(p.category_id)??"Sin categoría",quantity:p.quantity_on_hand,cost:Number(p.purchase_price),publicPrice:Number(p.general_sale_price),familyPrice:Number(p.family_sale_price),soldQuantity:0,salesRevenue:0}));
+      const loadedReservations:Reservation[]=reservationRows.map(r=>({id:Number(r.client_id),productId:productClientByDbId.get(r.product_id)??0,quantity:r.quantity,saleType:r.customer_type==="familia"?"Familia":"General",createdAt:String(r.reserved_at).slice(0,10)}));
+      const loadedDeliveries:Delivery[]=deliveryRows.map(d=>{const scheduled=new Date(d.scheduled_for),reservationClient=reservationClientByDbId.get(d.reservation_id),reservation=loadedReservations.find(r=>r.id===reservationClient),product=loadedProducts.find(p=>p.id===reservation?.productId),quantity=reservation?.quantity??0,saleType=reservation?.saleType??"General",price=product?(saleType==="Familia"?product.familyPrice:product.publicPrice)*quantity:0;return{id:Number(d.client_id),reservationId:reservationClient,productId:reservation?.productId,quantity,saleType,client:d.client_name,phone:d.client_phone??"",date:isoDate(scheduled),time:`${String(scheduled.getHours()).padStart(2,"0")}:${String(scheduled.getMinutes()).padStart(2,"0")}`,address:d.address??"",details:product?`${quantity} × ${product.name}`:"Entrega",price,mode:d.shipping_mode==="empresa"?"Empresa":"Propio",handoffDate:d.company_handoff_at?isoDate(new Date(d.company_handoff_at)):undefined,company:d.shipping_company??undefined,remuneration:d.remuneration_amount==null?undefined:Number(d.remuneration_amount),collectedAt:d.collected_at??undefined,remunerationWithdrawn:Boolean(d.remuneration_withdrawn_at)}});
+      setBusinessId(id);setCategories(categoryRows.map(c=>c.name));setProducts(loadedProducts);setReservations(loadedReservations);setDeliveries(loadedDeliveries);setCloudReady(true);
+    }
+    void loadCloudData();
+    return()=>{cancelled=true};
+  },[userId]);
+
+  useEffect(()=>{
+    if(!businessId||!cloudReady)return;
+    const timer=setTimeout(()=>{void (async()=>{
+      const existingCategories=await supabase.from("categories").select("id,name,is_active").eq("business_id",businessId);
+      const categoryIdByName=new Map<string,string>();
+      for(const name of categories){
+        const existing=existingCategories.data?.find(c=>c.name.toLowerCase()===name.toLowerCase());
+        if(existing){await supabase.from("categories").update({name,is_active:true,updated_at:new Date().toISOString()}).eq("id",existing.id);categoryIdByName.set(name,existing.id)}
+        else{const inserted=await supabase.from("categories").insert({business_id:businessId,name}).select("id").single();if(inserted.data)categoryIdByName.set(name,inserted.data.id)}
+      }
+      const removedCategories=(existingCategories.data??[]).filter(c=>c.is_active&&!categories.some(name=>name.toLowerCase()===c.name.toLowerCase())).map(c=>c.id);
+      if(removedCategories.length)await supabase.from("categories").update({is_active:false,updated_at:new Date().toISOString()}).in("id",removedCategories);
+      if(products.length)await supabase.from("products").upsert(products.map(p=>({business_id:businessId,client_id:p.id,category_id:categoryIdByName.get(p.category)??null,name:p.name,quantity_on_hand:Math.max(0,p.quantity-p.soldQuantity),purchase_price:p.cost,general_sale_price:p.publicPrice,family_sale_price:p.familyPrice,is_active:true,updated_at:new Date().toISOString()})),{onConflict:"business_id,client_id"});
+      const databaseProducts=await supabase.from("products").select("id,client_id,is_active").eq("business_id",businessId);
+      const productDbIdByClient=new Map((databaseProducts.data??[]).map(p=>[Number(p.client_id),p.id]));
+      const removedProducts=(databaseProducts.data??[]).filter(p=>p.is_active&&!products.some(local=>local.id===Number(p.client_id))).map(p=>p.id);
+      if(removedProducts.length)await supabase.from("products").update({is_active:false,updated_at:new Date().toISOString()}).in("id",removedProducts);
+      if(reservations.length)await supabase.from("reservations").upsert(reservations.flatMap(r=>{const productId=productDbIdByClient.get(r.productId);return productId?[{business_id:businessId,client_id:r.id,product_id:productId,quantity:r.quantity,customer_type:r.saleType==="Familia"?"familia":"general",status:"reservada",updated_at:new Date().toISOString()}]:[]}),{onConflict:"business_id,client_id"});
+      const databaseReservations=await supabase.from("reservations").select("id,client_id").eq("business_id",businessId);
+      const reservationDbIdByClient=new Map((databaseReservations.data??[]).map(r=>[Number(r.client_id),r.id]));
+      if(deliveries.length)await supabase.from("deliveries").upsert(deliveries.flatMap(d=>{const reservationId=d.reservationId?reservationDbIdByClient.get(d.reservationId):undefined;if(!reservationId)return[];const scheduled=new Date(`${d.date}T${d.time}:00-06:00`).toISOString();return[{business_id:businessId,client_id:d.id,reservation_id:reservationId,client_name:d.client,client_phone:d.phone,address:d.address,shipping_mode:d.mode==="Empresa"?"empresa":"propio",scheduled_for:scheduled,company_handoff_at:d.handoffDate?new Date(`${d.handoffDate}T12:00:00-06:00`).toISOString():null,shipping_company:d.company??null,remuneration_amount:d.mode==="Empresa"?(d.remuneration??0):null,status:d.collectedAt?"recogida":"programada",collected_at:d.collectedAt??null,remuneration_withdrawn_at:d.remunerationWithdrawn?new Date().toISOString():null,updated_at:new Date().toISOString()}]}),{onConflict:"business_id,client_id"});
+    })()},700);
+    return()=>clearTimeout(timer);
+  },[businessId,cloudReady,products,categories,reservations,deliveries]);
+
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(""),2800);return()=>clearTimeout(t)},[toast]);
 
   const upcoming=deliveries.filter(d=>d.date>=isoDate(now)).sort((a,b)=>`${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
@@ -47,11 +114,30 @@ export default function Home(){
   function saveDelivery(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget),productId=Number(f.get("productId")),quantity=Number(f.get("quantity")),saleType=String(f.get("saleType")) as SaleType,p=products.find(x=>x.id===productId);if(!p||quantity<1||quantity>availableFor(p))return;const reservationId=Date.now(),deliveryId=reservationId+1,price=(saleType==="Familia"?p.familyPrice:p.publicPrice)*quantity,mode=String(f.get("mode")) as DeliveryMode,date=String(mode==="Empresa"?f.get("pickupDate"):f.get("date")),time=String(mode==="Empresa"?f.get("pickupTime"):f.get("time"));setReservations(x=>[...x,{id:reservationId,productId,quantity,saleType,createdAt:isoDate(now),deliveryId}]);setDeliveries(x=>[...x,{id:deliveryId,reservationId,productId,quantity,saleType,mode,client:String(f.get("client")),phone:String(f.get("phone")),date,time,address:String(f.get("address")),details:`${quantity} × ${p.name}`,price,handoffDate:mode==="Empresa"?String(f.get("handoffDate")):undefined,company:mode==="Empresa"?String(f.get("company")):undefined,remuneration:mode==="Empresa"?Number(f.get("remuneration")):0}]);setSelectedDate(date);setModal(null);setToast("Entrega agendada y producto reservado")}
   const reservedFor=(id:number)=>reservations.filter(r=>r.productId===id).reduce((s,r)=>s+r.quantity,0);
   const availableFor=(p:Product)=>Math.max(0,p.quantity-p.soldQuantity-reservedFor(p.id));
+  async function recordSale(product:Product,quantity:number,saleType:SaleType,clientId=Date.now()){
+    if(!businessId)return;
+    const productRow=await supabase.from("products").select("id").eq("business_id",businessId).eq("client_id",product.id).single();
+    if(productRow.error)return setToast("La venta se reflejará al volver a intentarlo");
+    const unitPrice=saleType==="Familia"?product.familyPrice:product.publicPrice;
+    const result=await supabase.from("sales").upsert({business_id:businessId,client_id:clientId,product_id:productRow.data.id,quantity,customer_type:saleType==="Familia"?"familia":"general",unit_sale_price:unitPrice,unit_purchase_price:product.cost,total_collected:unitPrice*quantity,total_cost:product.cost*quantity,total_profit:(unitPrice-product.cost)*quantity},{onConflict:"business_id,client_id"});
+    if(result.error)setToast("La venta se reflejará al volver a intentarlo");
+  }
+  async function markReservation(r:Reservation,status:"recogida"|"liberada"){
+    if(!businessId)return;
+    const timestamp=new Date().toISOString();
+    await supabase.from("reservations").update({status,collected_at:status==="recogida"?timestamp:null,released_at:status==="liberada"?timestamp:null,updated_at:timestamp}).eq("business_id",businessId).eq("client_id",r.id);
+    if(r.deliveryId)await supabase.from("deliveries").update({status:status==="recogida"?"recogida":"no_recogida",collected_at:status==="recogida"?timestamp:null,updated_at:timestamp}).eq("business_id",businessId).eq("client_id",r.deliveryId);
+  }
+  async function markRemunerationWithdrawn(id:number){
+    if(!businessId)return;
+    const timestamp=new Date().toISOString();
+    await supabase.from("deliveries").update({remuneration_withdrawn_at:timestamp,updated_at:timestamp}).eq("business_id",businessId).eq("client_id",id);
+  }
   function openMovement(p:Product,type:"sale"|"reserve"){setSelected(p);setMovementType(type);setModal("movement")}
-  function confirmMovement(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!selected)return;const f=new FormData(e.currentTarget),quantity=Number(f.get("quantity")),saleType=String(f.get("saleType")) as SaleType;if(quantity<1||quantity>availableFor(selected))return;const price=saleType==="Familia"?selected.familyPrice:selected.publicPrice;if(movementType==="reserve"){const reservationId=Date.now(),deliveryId=reservationId+1,mode=String(f.get("mode")) as DeliveryMode,date=String(mode==="Empresa"?f.get("pickupDate"):f.get("date")),time=String(mode==="Empresa"?f.get("pickupTime"):f.get("time"));setReservations(x=>[...x,{id:reservationId,productId:selected.id,quantity,saleType,createdAt:isoDate(now),deliveryId}]);setDeliveries(x=>[...x,{id:deliveryId,reservationId,productId:selected.id,quantity,saleType,mode,client:String(f.get("client")),phone:String(f.get("phone")),date,time,address:String(f.get("address")),details:`${quantity} × ${selected.name}`,price:price*quantity,handoffDate:mode==="Empresa"?String(f.get("handoffDate")):undefined,company:mode==="Empresa"?String(f.get("company")):undefined,remuneration:mode==="Empresa"?Number(f.get("remuneration")):0}]);setToast("Reserva creada y entrega agregada al calendario")}else{setProducts(x=>x.map(p=>p.id===selected.id?{...p,soldQuantity:p.soldQuantity+quantity,salesRevenue:p.salesRevenue+price*quantity}:p));setToast(`Venta guardada. Ganancia: ${money((price-selected.cost)*quantity)}`)}setModal(null);setSelected(null)}
-  function completeReservation(r:Reservation){const p=products.find(x=>x.id===r.productId);if(!p)return;const price=r.saleType==="Familia"?p.familyPrice:p.publicPrice;setProducts(x=>x.map(item=>item.id===p.id?{...item,soldQuantity:item.soldQuantity+r.quantity,salesRevenue:item.salesRevenue+price*r.quantity}:item));setReservations(x=>x.filter(item=>item.id!==r.id));if(r.deliveryId)setDeliveries(x=>x.map(d=>d.id===r.deliveryId?{...d,collectedAt:new Date().toISOString()}:d));setToast("Cliente recogió: venta e inventario actualizados")}
-  function withdrawRemuneration(id:number){setDeliveries(x=>x.map(d=>d.id===id?{...d,remunerationWithdrawn:true}:d));setToast("Remuneración marcada como retirada")}
-  function releaseReservation(r:Reservation){setReservations(x=>x.filter(item=>item.id!==r.id));if(r.deliveryId)setDeliveries(x=>x.filter(d=>d.id!==r.deliveryId));setToast("Reserva liberada y entrega retirada del calendario")}
+  function confirmMovement(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!selected)return;const f=new FormData(e.currentTarget),quantity=Number(f.get("quantity")),saleType=String(f.get("saleType")) as SaleType;if(quantity<1||quantity>availableFor(selected))return;const price=saleType==="Familia"?selected.familyPrice:selected.publicPrice;if(movementType==="reserve"){const reservationId=Date.now(),deliveryId=reservationId+1,mode=String(f.get("mode")) as DeliveryMode,date=String(mode==="Empresa"?f.get("pickupDate"):f.get("date")),time=String(mode==="Empresa"?f.get("pickupTime"):f.get("time"));setReservations(x=>[...x,{id:reservationId,productId:selected.id,quantity,saleType,createdAt:isoDate(now),deliveryId}]);setDeliveries(x=>[...x,{id:deliveryId,reservationId,productId:selected.id,quantity,saleType,mode,client:String(f.get("client")),phone:String(f.get("phone")),date,time,address:String(f.get("address")),details:`${quantity} × ${selected.name}`,price:price*quantity,handoffDate:mode==="Empresa"?String(f.get("handoffDate")):undefined,company:mode==="Empresa"?String(f.get("company")):undefined,remuneration:mode==="Empresa"?Number(f.get("remuneration")):0}]);setToast("Reserva creada y entrega agregada al calendario")}else{void recordSale(selected,quantity,saleType);setProducts(x=>x.map(p=>p.id===selected.id?{...p,soldQuantity:p.soldQuantity+quantity,salesRevenue:p.salesRevenue+price*quantity}:p));setToast(`Venta guardada. Ganancia: ${money((price-selected.cost)*quantity)}`)}setModal(null);setSelected(null)}
+  function completeReservation(r:Reservation){const p=products.find(x=>x.id===r.productId);if(!p)return;const price=r.saleType==="Familia"?p.familyPrice:p.publicPrice;void recordSale(p,r.quantity,r.saleType,r.id);void markReservation(r,"recogida");setProducts(x=>x.map(item=>item.id===p.id?{...item,soldQuantity:item.soldQuantity+r.quantity,salesRevenue:item.salesRevenue+price*r.quantity}:item));setReservations(x=>x.filter(item=>item.id!==r.id));if(r.deliveryId)setDeliveries(x=>x.map(d=>d.id===r.deliveryId?{...d,collectedAt:new Date().toISOString()}:d));setToast("Cliente recogió: venta e inventario actualizados")}
+  function withdrawRemuneration(id:number){void markRemunerationWithdrawn(id);setDeliveries(x=>x.map(d=>d.id===id?{...d,remunerationWithdrawn:true}:d));setToast("Remuneración marcada como retirada")}
+  function releaseReservation(r:Reservation){void markReservation(r,"liberada");setReservations(x=>x.filter(item=>item.id!==r.id));if(r.deliveryId)setDeliveries(x=>x.filter(d=>d.id!==r.deliveryId));setToast("Reserva liberada y entrega retirada del calendario")}
   function openEdit(p:Product){setEditing(p);setModal("product")}
   function openDelivery(date=selectedDate){setSelectedDate(date);setModal("delivery")}
   function removeProductFromApp(product:Product){
@@ -70,8 +156,12 @@ export default function Home(){
     setEditing(null);setModal(null);setToast("Categoría retirada de esta aplicación");
   }
 
+  if(!authReady)return <div className="cloud-loading">Abriendo Variedades YesKar…</div>;
+  if(!userId)return <AuthScreen/>;
+  if(!cloudReady)return <div className="cloud-loading">Cargando tu inventario…</div>;
+
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-mark">Y</div><div><span className="eyebrow">MI EMPRENDIMIENTO</span><h1>Variedades YesKar</h1></div></header>
+    <header className="topbar"><div className="brand-mark">Y</div><div><span className="eyebrow">MI EMPRENDIMIENTO</span><h1>Variedades YesKar</h1></div><button className="sign-out" onClick={()=>supabase.auth.signOut()}>Salir</button></header>
     <div className="content">
       {tab==="inicio"&&<>
         <section className="welcome"><div className="welcome-copy"><p>{fullDate(isoDate(now))}</p><h2>¡Hola, Yesi!</h2><span>Aquí tienes lo más importante de hoy.</span></div><img className="mascot" src="/images/yeskar-elephant-v2.png" alt="Elefantito con mochila, mascota de Variedades YesKar"/></section>
@@ -96,6 +186,21 @@ export default function Home(){
     <nav className="bottom-nav" aria-label="Navegación principal"><button className={tab==="inicio"?"active":""} onClick={()=>setTab("inicio")}><b>⌂</b><span>Inicio</span></button><button className={tab==="productos"?"active":""} onClick={()=>setTab("productos")}><b>▦</b><span>Productos</span></button><button className={tab==="agenda"?"active":""} onClick={()=>setTab("agenda")}><b>□</b><span>Calendario</span></button></nav>
     {modal&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setModal(null);setEditing(null)}}}><section className="modal" role="dialog" aria-modal="true"><button className="close" onClick={()=>{setModal(null);setEditing(null)}} aria-label="Cerrar">×</button>{modal==="product"&&<ProductForm product={editing} categories={categories} onSubmit={saveProduct} onDeleteProduct={removeProductFromApp} onDeleteCategory={removeCategoryFromApp}/>} {modal==="delivery"&&<DeliveryForm date={selectedDate} products={products} availableFor={availableFor} onSubmit={saveDelivery}/>} {modal==="movement"&&selected&&<MovementForm product={selected} available={availableFor(selected)} type={movementType} onSubmit={confirmMovement}/>}</section></div>}{toast&&<div className="toast">✓ {toast}</div>}
   </main>
+}
+
+function AuthScreen(){
+  const [mode,setMode]=useState<"login"|"signup">("login");
+  const [message,setMessage]=useState("");
+  const [busy,setBusy]=useState(false);
+  async function submit(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();setBusy(true);setMessage("");
+    const form=new FormData(e.currentTarget),email=String(form.get("email")).trim(),password=String(form.get("password"));
+    const result=mode==="signup"?await supabase.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}}):await supabase.auth.signInWithPassword({email,password});
+    setBusy(false);
+    if(result.error)setMessage(result.error.message==="Invalid login credentials"?"Correo o contraseña incorrectos.":result.error.message);
+    else if(mode==="signup"&&!result.data.session)setMessage("Revisa tu correo y confirma la cuenta. Después vuelve para iniciar sesión.");
+  }
+  return <main className="auth-page"><section className="auth-card"><img src="/images/yeskar-elephant-v2.png" alt="Mascota de Variedades YesKar"/><span className="eyebrow">INVENTARIO Y ENTREGAS</span><h1>Variedades YesKar</h1><p>{mode==="login"?"Ingresa para ver y guardar el inventario de Yesi.":"Crea la cuenta segura del negocio."}</p><form onSubmit={submit}><label>Correo electrónico<input required name="email" type="email" autoComplete="email" placeholder="correo@ejemplo.com"/></label><label>Contraseña<input required name="password" type="password" minLength={6} autoComplete={mode==="login"?"current-password":"new-password"} placeholder="Mínimo 6 caracteres"/></label>{message&&<div className="auth-message">{message}</div>}<button className="submit" disabled={busy}>{busy?"Espera…":mode==="login"?"Ingresar":"Crear cuenta"}</button></form><button className="auth-switch" onClick={()=>{setMode(mode==="login"?"signup":"login");setMessage("")}}>{mode==="login"?"Crear la cuenta por primera vez":"Ya tengo una cuenta"}</button></section></main>
 }
 
 function ProductCard({product:p,available,reserved,onEdit,onMovement}:{product:Product;available:number;reserved:number;onEdit:(p:Product)=>void;onMovement:(p:Product,t:"sale"|"reserve")=>void}){return <article className="product-card"><button className="product-main" onClick={()=>onEdit(p)}><div className="product-image">{p.name.charAt(0)}</div><div><span className={`state ${available?"disponible":"vendido"}`}>{available?"Disponible":"Agotado"}</span><h3>{p.name}</h3><p>{p.category}{reserved?` · ${reserved} reservadas`:""}</p></div><span className="quantity"><b>{available}</b><small>disponibles</small></span></button><div className="prices"><span><small>Compra por unidad</small><b>{money(p.cost)}</b></span><span><small>Venta general</small><b>{money(p.publicPrice)}</b></span><span className="gain"><small>Venta familia</small><b>{money(p.familyPrice)}</b></span></div><div className="product-investment"><span>Total invertido en este producto</span><strong>{money(available*p.cost)}</strong></div><button className="edit-product" onClick={()=>onEdit(p)}>Editar producto y cantidad</button><div className="status-actions"><button className="reserve" disabled={!available} onClick={()=>onMovement(p,"reserve")}>Reserva</button><button className="sell" disabled={!available} onClick={()=>onMovement(p,"sale")}>Venta</button></div>{p.soldQuantity>0&&<div className="sold-note">{p.soldQuantity} unidad{p.soldQuantity===1?"":"es"} vendida{p.soldQuantity===1?"":"s"} hasta ahora</div>}</article>}
