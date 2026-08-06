@@ -63,6 +63,21 @@ export default function Home(){
   function releaseReservation(r:Reservation){setReservations(x=>x.filter(item=>item.id!==r.id));if(r.deliveryId)setDeliveries(x=>x.filter(d=>d.id!==r.deliveryId));setToast("Reserva liberada y entrega retirada del calendario")}
   function openEdit(p:Product){setEditing(p);setModal("product")}
   function openDelivery(date=selectedDate){setSelectedDate(date);setModal("delivery")}
+  function removeProductFromApp(product:Product){
+    if(!window.confirm(`¿Quitar ${product.name} de la aplicación? Esta acción no borra datos de Supabase.`))return;
+    const linkedReservationIds=reservations.filter(r=>r.productId===product.id).map(r=>r.id);
+    setProducts(x=>x.filter(p=>p.id!==product.id));
+    setReservations(x=>x.filter(r=>r.productId!==product.id));
+    setDeliveries(x=>x.filter(d=>d.productId!==product.id&&!linkedReservationIds.includes(d.reservationId??-1)));
+    setEditing(null);setModal(null);setToast("Producto retirado de esta aplicación");
+  }
+  function removeCategoryFromApp(category:string){
+    if(!category||!window.confirm(`¿Quitar la categoría ${category}? Los productos pasarán a “Sin categoría”.`))return;
+    const fallback="Sin categoría";
+    setProducts(x=>x.map(p=>p.category===category?{...p,category:fallback}:p));
+    setCategories(x=>Array.from(new Set([...x.filter(c=>c!==category),fallback])).sort());
+    setEditing(null);setModal(null);setToast("Categoría retirada de esta aplicación");
+  }
 
   return <main className="app-shell">
     <header className="topbar"><div className="brand-mark">Y</div><div><span className="eyebrow">MI EMPRENDIMIENTO</span><h1>Variedades YesKar</h1></div></header>
@@ -88,7 +103,7 @@ export default function Home(){
       </>}
     </div>
     <nav className="bottom-nav" aria-label="Navegación principal"><button className={tab==="inicio"?"active":""} onClick={()=>setTab("inicio")}><b>⌂</b><span>Inicio</span></button><button className={tab==="productos"?"active":""} onClick={()=>setTab("productos")}><b>▦</b><span>Productos</span></button><button className={tab==="agenda"?"active":""} onClick={()=>setTab("agenda")}><b>□</b><span>Calendario</span></button></nav>
-    {modal&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setModal(null);setEditing(null)}}}><section className="modal" role="dialog" aria-modal="true"><button className="close" onClick={()=>{setModal(null);setEditing(null)}} aria-label="Cerrar">×</button>{modal==="product"&&<ProductForm product={editing} categories={categories} onSubmit={saveProduct}/>} {modal==="delivery"&&<DeliveryForm date={selectedDate} products={products} availableFor={availableFor} onSubmit={saveDelivery}/>} {modal==="movement"&&selected&&<MovementForm product={selected} available={availableFor(selected)} type={movementType} onSubmit={confirmMovement}/>}</section></div>}{toast&&<div className="toast">✓ {toast}</div>}
+    {modal&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setModal(null);setEditing(null)}}}><section className="modal" role="dialog" aria-modal="true"><button className="close" onClick={()=>{setModal(null);setEditing(null)}} aria-label="Cerrar">×</button>{modal==="product"&&<ProductForm product={editing} categories={categories} onSubmit={saveProduct} onDeleteProduct={removeProductFromApp} onDeleteCategory={removeCategoryFromApp}/>} {modal==="delivery"&&<DeliveryForm date={selectedDate} products={products} availableFor={availableFor} onSubmit={saveDelivery}/>} {modal==="movement"&&selected&&<MovementForm product={selected} available={availableFor(selected)} type={movementType} onSubmit={confirmMovement}/>}</section></div>}{toast&&<div className="toast">✓ {toast}</div>}
   </main>
 }
 
@@ -98,7 +113,33 @@ function ReservedList({reservations,products,deliveries,onComplete,onRelease}:{r
 
 function Calendar({month,selected,deliveries,onMonth,onSelect}:{month:Date;selected:string;deliveries:Delivery[];onMonth:(d:Date)=>void;onSelect:(s:string)=>void}){const year=month.getFullYear(),m=month.getMonth(),days=new Date(year,m+1,0).getDate();let start=new Date(year,m,1).getDay();start=start===0?6:start-1;const cells:Array<Date|null>=[...Array(start).fill(null),...Array.from({length:days},(_,i)=>new Date(year,m,i+1))];while(cells.length%7)cells.push(null);const monthName=new Intl.DateTimeFormat("es-SV",{month:"long",year:"numeric"}).format(month);return <section className="calendar"><header><button onClick={()=>onMonth(new Date(year,m-1,1))} aria-label="Mes anterior">‹</button><h3>{monthName}</h3><button onClick={()=>onMonth(new Date(year,m+1,1))} aria-label="Mes siguiente">›</button></header><div className="weekdays">{["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"].map(x=><span key={x}>{x}</span>)}</div><div className="days">{cells.map((d,i)=>d?<button key={i} className={`${isoDate(d)===selected?"selected":""} ${isoDate(d)===isoDate(now)?"today":""}`} onClick={()=>onSelect(isoDate(d))}><b>{d.getDate()}</b>{deliveries.some(x=>x.date===isoDate(d))&&<i>{deliveries.filter(x=>x.date===isoDate(d)).length}</i>}</button>:<span key={i}/>)}</div><button className="today-button" onClick={()=>{onMonth(new Date(now.getFullYear(),now.getMonth(),1));onSelect(isoDate(now))}}>Ir a hoy</button></section>}
 function DeliveryCard({delivery:d}:{delivery:Delivery}){return <article className="delivery-card"><div className="date-block"><b>{d.time}</b><span>{money(d.price)}</span></div><div><span className="delivery-mode">{d.mode==="Empresa"?`Envío · ${d.company}`:"Entrega propia"}</span><h3>{d.client}</h3><p>{d.details}</p>{d.mode==="Empresa"&&<small>Entregar a empresa: {d.handoffDate}</small>}<small>{d.address}</small><a href={`tel:${d.phone}`}>Llamar al {d.phone}</a></div></article>}
-function ProductForm({product,categories,onSubmit}:{product:Product|null;categories:string[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void}){const [cost,setCost]=useState(product?.cost??0),[general,setGeneral]=useState(product?.publicPrice??0),[family,setFamily]=useState(product?.familyPrice??0),[isNew,setIsNew]=useState(false);return <form onSubmit={onSubmit}><span className="eyebrow">{product?"EDITAR PRODUCTO":"NUEVO PRODUCTO"}</span><h2>{product?product.name:"Agregar producto"}</h2><div className="form-grid"><label className="wide">Nombre del producto<input required name="name" defaultValue={product?.name} placeholder="Ejemplo: Vela de vainilla" autoFocus/></label><label className="wide">Cantidad<input required name="quantity" type="number" min="1" step="1" defaultValue={product?.quantity??1}/><small className="field-help">¿Cuántas unidades iguales tienes?</small></label><label className="wide">Categoría<select required={!isNew} name="category" defaultValue={product?.category??categories[0]} disabled={isNew}>{categories.map(c=><option key={c}>{c}</option>)}</select><button type="button" className="new-category-button" onClick={()=>setIsNew(!isNew)}>{isNew?"Elegir una existente":"＋ Crear categoría nueva"}</button></label>{isNew&&<label className="wide new-category">Nombre de la categoría<input required name="newCategory" placeholder="Ejemplo: Accesorios"/></label>}<label className="wide">Precio de compra por unidad<input required name="cost" type="number" min="0" step="0.01" value={cost} onChange={e=>setCost(Number(e.target.value))}/></label><label>Venta general<input required name="publicPrice" type="number" min="0" step="0.01" value={general} onChange={e=>setGeneral(Number(e.target.value))}/><small className="calculated">Ganancia por unidad: {money(general-cost)}</small></label><label>Venta familia<input required name="familyPrice" type="number" min="0" step="0.01" value={family} onChange={e=>setFamily(Number(e.target.value))}/><small className="calculated">Ganancia por unidad: {money(family-cost)}</small></label></div><button className="submit">{product?"Guardar cambios":"Agregar producto"}</button></form>}
+function ProductForm({product,categories,onSubmit,onDeleteProduct,onDeleteCategory}:{product:Product|null;categories:string[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDeleteProduct:(p:Product)=>void;onDeleteCategory:(category:string)=>void}){
+  const [cost,setCost]=useState(product?.cost??0);
+  const [general,setGeneral]=useState(product?.publicPrice??0);
+  const [family,setFamily]=useState(product?.familyPrice??0);
+  const [isNew,setIsNew]=useState(false);
+  const [selectedCategory,setSelectedCategory]=useState(product?.category??categories[0]??"");
+  return <form onSubmit={onSubmit}>
+    <span className="eyebrow">{product?"EDITAR PRODUCTO":"NUEVO PRODUCTO"}</span>
+    <h2>{product?product.name:"Agregar producto"}</h2>
+    <div className="form-grid">
+      <label className="wide">Nombre del producto<input required name="name" defaultValue={product?.name} placeholder="Ejemplo: Vela de vainilla" autoFocus/></label>
+      <label className="wide">Cantidad<input required name="quantity" type="number" min="1" step="1" defaultValue={product?.quantity??1}/><small className="field-help">¿Cuántas unidades iguales tienes?</small></label>
+      <label className="wide">Categoría<select required={!isNew} name="category" value={selectedCategory} disabled={isNew} onChange={e=>setSelectedCategory(e.target.value)}>{categories.map(c=><option key={c}>{c}</option>)}</select><button type="button" className="new-category-button" onClick={()=>setIsNew(!isNew)}>{isNew?"Elegir una existente":"＋ Crear categoría nueva"}</button></label>
+      {isNew&&<label className="wide new-category">Nombre de la categoría<input required name="newCategory" placeholder="Ejemplo: Accesorios"/></label>}
+      <label className="wide">Precio de compra por unidad<input required name="cost" type="number" min="0" step="0.01" value={cost} onChange={e=>setCost(Number(e.target.value))}/></label>
+      <label>Venta general<input required name="publicPrice" type="number" min="0" step="0.01" value={general} onChange={e=>setGeneral(Number(e.target.value))}/><small className="calculated">Ganancia por unidad: {money(general-cost)}</small></label>
+      <label>Venta familia<input required name="familyPrice" type="number" min="0" step="0.01" value={family} onChange={e=>setFamily(Number(e.target.value))}/><small className="calculated">Ganancia por unidad: {money(family-cost)}</small></label>
+    </div>
+    <button className="submit">{product?"Guardar cambios":"Agregar producto"}</button>
+    <details className="delete-options">
+      <summary>Más opciones</summary>
+      <p>Estas acciones solo retiran información de esta aplicación.</p>
+      {!isNew&&selectedCategory&&<button type="button" onClick={()=>onDeleteCategory(selectedCategory)}>Eliminar categoría “{selectedCategory}”</button>}
+      {product&&<button type="button" className="delete-product-button" onClick={()=>onDeleteProduct(product)}>Eliminar producto</button>}
+    </details>
+  </form>
+}
 function DeliveryForm({date,products,availableFor,onSubmit}:{date:string;products:Product[];availableFor:(p:Product)=>number;onSubmit:(e:FormEvent<HTMLFormElement>)=>void}){
   const choices=products.filter(p=>availableFor(p)>0);
   const [productId,setProductId]=useState(choices[0]?.id??0);
