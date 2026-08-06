@@ -31,6 +31,8 @@ test("keeps cloud persistence and mobile-first controls in the source", async ()
     readFile(new URL("../app/supabase.ts", import.meta.url), "utf8"),
   ]);
   assert.match(client, /createClient/);
+  assert.match(client, /return url\.origin/);
+  assert.match(client, /discard any accidental path/);
   assert.match(client, /persistSession:\s*true/);
   assert.match(page, /supabase\.auth\.signInWithPassword/);
   assert.match(page, /activeUserId\.current===nextUserId/);
