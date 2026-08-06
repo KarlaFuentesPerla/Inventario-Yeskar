@@ -43,3 +43,16 @@ test("keeps cloud persistence and mobile-first controls in the source", async ()
   assert.match(css, /@media\s*\(min-width:\s*720px\)/);
   assert.match(css, /min-height:\s*48px/);
 });
+
+test("schedules remuneration reminders from the customer delivery time", async () => {
+  const [page, worker, migration] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/notification-worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260806160000_schedule_remuneration_from_delivery.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /d\.mode==="Empresa"&&d\.remuneration/);
+  assert.match(worker, /\["no_recogida", "cancelada"\]\.includes\(delivery\.status\)/);
+  assert.doesNotMatch(worker, /delivery\.status !== "recogida"/);
+  assert.match(migration, /new\.scheduled_for \+ interval '48 hours'/);
+  assert.match(migration, /new\.status not in \('no_recogida','cancelada'\)/);
+});

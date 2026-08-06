@@ -64,7 +64,7 @@ function emailFor(job: Job) {
   return {
     subject: `Ya puedes retirar ${money(delivery.remuneration_amount)}`,
     heading: "Remuneración disponible",
-    message: `Ya pasaron 48 horas desde que ${delivery.client_name} recogió su pedido.`,
+    message: `Ya pasaron 48 horas desde la entrega programada para ${delivery.client_name}. Recuerda solicitar la remuneración.`,
     details: [
       ["Empresa", delivery.shipping_company || "Empresa de envío"],
       ["Producto", product], ["Total a retirar", money(delivery.remuneration_amount)],
@@ -130,8 +130,8 @@ Deno.serve(async (request: Request) => {
     const staleDeliveryReminder = job.notification_type === "entrega_2_horas"
       && (delivery.status !== "programada" || new Date(delivery.scheduled_for) <= new Date());
     const staleRemunerationReminder = job.notification_type === "remuneracion_48_horas"
-      && (delivery.shipping_mode !== "empresa" || delivery.status !== "recogida"
-        || !delivery.collected_at || Boolean(delivery.remuneration_withdrawn_at));
+      && (delivery.shipping_mode !== "empresa"
+        || ["no_recogida", "cancelada"].includes(delivery.status));
     if (staleDeliveryReminder || staleRemunerationReminder) {
       await supabase.from("notification_jobs").update({ status: "cancelada", updated_at: now }).eq("id", job.id);
       cancelled += 1;
