@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type SaleType = "General" | "Familia";
 type Product = { id:number; name:string; category:string; quantity:number; cost:number; publicPrice:number; familyPrice:number; soldQuantity:number; salesRevenue:number; status?:string; saleType?:SaleType; soldPrice?:number };
@@ -46,9 +46,6 @@ export default function Home(){
   useEffect(()=>{localStorage.setItem("tallercito-v2",JSON.stringify({products,deliveries,categories,reservations}))},[products,deliveries,categories,reservations]);
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(""),2800);return()=>clearTimeout(t)},[toast]);
 
-  const invested=useMemo(()=>products.reduce((s,p)=>s+p.cost*p.soldQuantity,0),[products]);
-  const revenue=useMemo(()=>products.reduce((s,p)=>s+p.salesRevenue,0),[products]);
-  const profit=revenue-invested;
   const upcoming=deliveries.filter(d=>d.date>=isoDate(now)).sort((a,b)=>`${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
   const filtered=products.filter(p=>`${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
   const dayDeliveries=deliveries.filter(d=>d.date===selectedDate).sort((a,b)=>a.time.localeCompare(b.time));
@@ -71,8 +68,6 @@ export default function Home(){
     <div className="content">
       {tab==="inicio"&&<>
         <section className="welcome"><div className="welcome-copy"><p>{fullDate(isoDate(now))}</p><h2>¡Hola, Yesi!</h2><span>Aquí tienes lo más importante de hoy.</span></div><img className="mascot" src="/images/yeskar-elephant-v2.png" alt="Elefantito con mochila, mascota de Variedades YesKar"/></section>
-        <section className="section-title"><h2>Resumen de ventas</h2><p>Calculado con los productos marcados como vendidos.</p></section>
-        <div className="money-grid"><article><span>Dinero recogido</span><strong>{money(revenue)}</strong></article><article><span>Dinero gastado</span><strong>{money(invested)}</strong></article><article className="profit"><span>Ganancia total</span><strong>{money(profit)}</strong></article></div>
         {payoutReminders.length>0&&<section className="payout-section"><h2>Remuneraciones por retirar</h2>{payoutReminders.map(d=><article className={d.dueAt<=new Date()?"due":""} key={d.id}><div><span>{d.dueAt<=new Date()?"YA PUEDES RETIRAR":"DISPONIBLE PRÓXIMAMENTE"}</span><strong>{money(d.remuneration!)} · {d.company}</strong><small>Retirar después del {new Intl.DateTimeFormat("es-SV",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}).format(d.dueAt)}</small></div><button disabled={d.dueAt>new Date()} onClick={()=>withdrawRemuneration(d.id)}>Marcar retirada</button></article>)}</section>}
         <div className="home-actions"><button onClick={()=>{setEditing(null);setModal("product")}}><b>＋</b><span><strong>Agregar producto</strong><small>Registrar un artículo nuevo</small></span></button><button onClick={()=>openDelivery(isoDate(now))}><b>＋</b><span><strong>Agendar entrega</strong><small>Crear una cita en el calendario</small></span></button></div>
         <section className="section-title row"><div><h2>Próximas entregas</h2><p>{upcoming.length} entrega{upcoming.length===1?"":"s"} pendiente{upcoming.length===1?"":"s"}</p></div><button onClick={()=>setTab("agenda")}>Ver calendario</button></section>
