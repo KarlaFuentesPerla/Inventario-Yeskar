@@ -12,16 +12,8 @@ type Tab = "inicio" | "productos" | "agenda";
 const now = new Date();
 const isoDate = (date:Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 const datePlus = (days:number) => { const d=new Date(); d.setDate(d.getDate()+days); return isoDate(d); };
-const demoProducts:Product[] = [
-  {id:1,name:"Vela Lavanda",category:"Velas",quantity:12,cost:4.25,publicPrice:8.50,familyPrice:7,soldQuantity:0,salesRevenue:0},
-  {id:2,name:"Jabón de avena",category:"Cuidado",quantity:6,cost:1.75,publicPrice:4,familyPrice:3.25,soldQuantity:0,salesRevenue:0},
-  {id:3,name:"Caja regalo",category:"Regalos",quantity:5,cost:9,publicPrice:18,familyPrice:15,soldQuantity:2,salesRevenue:36},
-  {id:4,name:"Aceite de rosas",category:"Cuidado",quantity:4,cost:5.50,publicPrice:11.50,familyPrice:9.50,soldQuantity:0,salesRevenue:0},
-];
-const demoDeliveries:Delivery[] = [
-  {id:1,client:"Ana Martínez",phone:"7845-2210",date:datePlus(0),time:"10:30",address:"Colonia Escalón, San Salvador",details:"2 velas de lavanda",price:17},
-  {id:2,client:"Carlos Méndez",phone:"7012-8890",date:datePlus(2),time:"15:00",address:"Santa Tecla",details:"1 caja de regalo",price:18},
-];
+const demoProducts:Product[] = [];
+const demoDeliveries:Delivery[] = [];
 
 const money=(n:number)=>new Intl.NumberFormat("es-SV",{style:"currency",currency:"USD"}).format(n||0);
 const fullDate=(s:string)=>new Intl.DateTimeFormat("es-SV",{weekday:"long",day:"numeric",month:"long"}).format(new Date(`${s}T12:00:00`));
@@ -29,8 +21,8 @@ const fullDate=(s:string)=>new Intl.DateTimeFormat("es-SV",{weekday:"long",day:"
 export default function Home(){
   const [tab,setTab]=useState<Tab>("inicio");
   const [products,setProducts]=useState<Product[]>(demoProducts);
-  const [reservations,setReservations]=useState<Reservation[]>([{id:101,productId:2,quantity:2,saleType:"Familia",createdAt:datePlus(0)}]);
-  const [categories,setCategories]=useState<string[]>(["Velas","Cuidado","Regalos"]);
+  const [reservations,setReservations]=useState<Reservation[]>([]);
+  const [categories,setCategories]=useState<string[]>([]);
   const [deliveries,setDeliveries]=useState<Delivery[]>(demoDeliveries);
   const [query,setQuery]=useState("");
   const [productView,setProductView]=useState<"inventory"|"reserved">("inventory");
@@ -45,7 +37,6 @@ export default function Home(){
   useEffect(()=>{const raw=localStorage.getItem("tallercito-v2");if(raw){try{const d=JSON.parse(raw);const migratedReservations:Reservation[]=d.reservations??[];const loaded:Product[]=d.products.map((p:Product)=>{const quantity=p.quantity??1;const wasSold=p.status==="Vendido";if(p.status==="Reservado"&&!migratedReservations.some(r=>r.productId===p.id))migratedReservations.push({id:Date.now()+p.id,productId:p.id,quantity,saleType:"General",createdAt:isoDate(now)});return{...p,quantity,soldQuantity:p.soldQuantity??(wasSold?quantity:0),salesRevenue:p.salesRevenue??(wasSold?(p.soldPrice??p.publicPrice)*quantity:0)}});setProducts(loaded);setReservations(migratedReservations);setDeliveries(d.deliveries);setCategories(d.categories??Array.from(new Set(loaded.map(p=>p.category))))}catch{}}},[]);
   useEffect(()=>{localStorage.setItem("tallercito-v2",JSON.stringify({products,deliveries,categories,reservations}))},[products,deliveries,categories,reservations]);
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(""),2800);return()=>clearTimeout(t)},[toast]);
-  useEffect(()=>{if(!modal)return;const selector=modal==="product"&&!editing?'input[type="number"]':'input[name="quantity"]';const t=setTimeout(()=>{document.querySelectorAll<HTMLInputElement>(selector).forEach(input=>{input.value=""})},0);return()=>clearTimeout(t)},[modal,editing,selected]);
 
   const upcoming=deliveries.filter(d=>d.date>=isoDate(now)).sort((a,b)=>`${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
   const filtered=products.filter(p=>`${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
@@ -114,22 +105,22 @@ function ReservedList({reservations,products,deliveries,onComplete,onRelease}:{r
 function Calendar({month,selected,deliveries,onMonth,onSelect}:{month:Date;selected:string;deliveries:Delivery[];onMonth:(d:Date)=>void;onSelect:(s:string)=>void}){const year=month.getFullYear(),m=month.getMonth(),days=new Date(year,m+1,0).getDate();let start=new Date(year,m,1).getDay();start=start===0?6:start-1;const cells:Array<Date|null>=[...Array(start).fill(null),...Array.from({length:days},(_,i)=>new Date(year,m,i+1))];while(cells.length%7)cells.push(null);const monthName=new Intl.DateTimeFormat("es-SV",{month:"long",year:"numeric"}).format(month);return <section className="calendar"><header><button onClick={()=>onMonth(new Date(year,m-1,1))} aria-label="Mes anterior">‹</button><h3>{monthName}</h3><button onClick={()=>onMonth(new Date(year,m+1,1))} aria-label="Mes siguiente">›</button></header><div className="weekdays">{["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"].map(x=><span key={x}>{x}</span>)}</div><div className="days">{cells.map((d,i)=>d?<button key={i} className={`${isoDate(d)===selected?"selected":""} ${isoDate(d)===isoDate(now)?"today":""}`} onClick={()=>onSelect(isoDate(d))}><b>{d.getDate()}</b>{deliveries.some(x=>x.date===isoDate(d))&&<i>{deliveries.filter(x=>x.date===isoDate(d)).length}</i>}</button>:<span key={i}/>)}</div><button className="today-button" onClick={()=>{onMonth(new Date(now.getFullYear(),now.getMonth(),1));onSelect(isoDate(now))}}>Ir a hoy</button></section>}
 function DeliveryCard({delivery:d}:{delivery:Delivery}){return <article className="delivery-card"><div className="date-block"><b>{d.time}</b><span>{money(d.price)}</span></div><div><span className="delivery-mode">{d.mode==="Empresa"?`Envío · ${d.company}`:"Entrega propia"}</span><h3>{d.client}</h3><p>{d.details}</p>{d.mode==="Empresa"&&<small>Entregar a empresa: {d.handoffDate}</small>}<small>{d.address}</small><a href={`tel:${d.phone}`}>Llamar al {d.phone}</a></div></article>}
 function ProductForm({product,categories,onSubmit,onDeleteProduct,onDeleteCategory}:{product:Product|null;categories:string[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDeleteProduct:(p:Product)=>void;onDeleteCategory:(category:string)=>void}){
-  const [cost,setCost]=useState(product?.cost??0);
-  const [general,setGeneral]=useState(product?.publicPrice??0);
-  const [family,setFamily]=useState(product?.familyPrice??0);
-  const [isNew,setIsNew]=useState(false);
+  const [cost,setCost]=useState(product?String(product.cost):"");
+  const [general,setGeneral]=useState(product?String(product.publicPrice):"");
+  const [family,setFamily]=useState(product?String(product.familyPrice):"");
+  const [isNew,setIsNew]=useState(categories.length===0);
   const [selectedCategory,setSelectedCategory]=useState(product?.category??categories[0]??"");
   return <form onSubmit={onSubmit}>
     <span className="eyebrow">{product?"EDITAR PRODUCTO":"NUEVO PRODUCTO"}</span>
     <h2>{product?product.name:"Agregar producto"}</h2>
     <div className="form-grid">
       <label className="wide">Nombre del producto<input required name="name" defaultValue={product?.name} placeholder="Ejemplo: Vela de vainilla" autoFocus/></label>
-      <label className="wide">Cantidad<input required name="quantity" type="number" min="1" step="1" defaultValue={product?.quantity??1}/><small className="field-help">¿Cuántas unidades iguales tienes?</small></label>
+      <label className="wide">Cantidad<input required name="quantity" type="number" min="1" step="1" defaultValue={product?.quantity}/><small className="field-help">¿Cuántas unidades iguales tienes?</small></label>
       <label className="wide">Categoría<select required={!isNew} name="category" value={selectedCategory} disabled={isNew} onChange={e=>setSelectedCategory(e.target.value)}>{categories.map(c=><option key={c}>{c}</option>)}</select><button type="button" className="new-category-button" onClick={()=>setIsNew(!isNew)}>{isNew?"Elegir una existente":"＋ Crear categoría nueva"}</button></label>
       {isNew&&<label className="wide new-category">Nombre de la categoría<input required name="newCategory" placeholder="Ejemplo: Accesorios"/></label>}
-      <label className="wide">Precio de compra por unidad<input required name="cost" type="number" min="0" step="0.01" value={cost} onChange={e=>setCost(Number(e.target.value))}/></label>
-      <label>Venta general<input required name="publicPrice" type="number" min="0" step="0.01" value={general} onChange={e=>setGeneral(Number(e.target.value))}/><small className="calculated">Ganancia por unidad: {money(general-cost)}</small></label>
-      <label>Venta familia<input required name="familyPrice" type="number" min="0" step="0.01" value={family} onChange={e=>setFamily(Number(e.target.value))}/><small className="calculated">Ganancia por unidad: {money(family-cost)}</small></label>
+      <label className="wide">Precio de compra por unidad<input required name="cost" type="number" min="0" step="0.01" value={cost} onChange={e=>setCost(e.target.value)}/></label>
+      <label>Venta general<input required name="publicPrice" type="number" min="0" step="0.01" value={general} onChange={e=>setGeneral(e.target.value)}/><small className="calculated">Ganancia por unidad: {money((Number(general)||0)-(Number(cost)||0))}</small></label>
+      <label>Venta familia<input required name="familyPrice" type="number" min="0" step="0.01" value={family} onChange={e=>setFamily(e.target.value)}/><small className="calculated">Ganancia por unidad: {money((Number(family)||0)-(Number(cost)||0))}</small></label>
     </div>
     <button className="submit">{product?"Guardar cambios":"Agregar producto"}</button>
     <details className="delete-options">
