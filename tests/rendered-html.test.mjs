@@ -53,6 +53,9 @@ test("schedules remuneration reminders from the customer delivery time", async (
   assert.match(page, /d\.mode==="Empresa"&&d\.remuneration/);
   assert.match(worker, /\["no_recogida", "cancelada"\]\.includes\(delivery\.status\)/);
   assert.doesNotMatch(worker, /delivery\.status !== "recogida"/);
+  assert.match(worker, /Recordatorio de remuneración/);
+  assert.match(worker, /<meta charset="utf-8">/);
+  assert.doesNotMatch(worker, /Ã|Â|ð/);
   assert.match(migration, /new\.scheduled_for \+ interval '48 hours'/);
   assert.match(migration, /new\.status not in \('no_recogida','cancelada'\)/);
 });
