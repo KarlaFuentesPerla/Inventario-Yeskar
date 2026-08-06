@@ -32,7 +32,7 @@ type Job = {
   };
 };
 
-const jsonHeaders = { "Content-Type": "application/json" };
+const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
 const htmlEscape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
 }[character] ?? character));
@@ -51,35 +51,90 @@ function emailFor(job: Job) {
 
   if (job.notification_type === "entrega_2_horas") {
     return {
-      subject: `Entrega en 2 horas: ${delivery.client_name}`,
+      subject: `Recordatorio de entrega: ${delivery.client_name}`,
+      preheader: `Entrega programada para ${formatDate(delivery.scheduled_for)}`,
       heading: "Entrega próxima",
-      message: `Yesi, recuerda que tienes una entrega programada para ${formatDate(delivery.scheduled_for)}.`,
+      message: `Hola, Yesi. Tienes una entrega programada dentro de dos horas.`,
       details: [
-        ["Cliente", delivery.client_name], ["Producto", product],
+        ["Fecha y hora", formatDate(delivery.scheduled_for)],
+        ["Cliente", delivery.client_name],
+        ["Producto", product],
         ["Lugar", delivery.address || "Sin dirección"],
       ],
+      closing: "Revisa los detalles y prepara el pedido con tiempo.",
     };
   }
 
   return {
-    subject: `Ya puedes retirar ${money(delivery.remuneration_amount)}`,
-    heading: "Remuneración disponible",
-    message: `Ya pasaron 48 horas desde la entrega programada para ${delivery.client_name}. Recuerda solicitar la remuneración.`,
+    subject: "Recordatorio de remuneración · Variedades YesKar",
+    preheader: `Solicita ${money(delivery.remuneration_amount)} a ${delivery.shipping_company || "la empresa de envío"}`,
+    heading: "Remuneración por retirar",
+    message: `Hola, Yesi. Ya pasaron 48 horas desde la entrega programada para ${delivery.client_name}.`,
     details: [
       ["Empresa", delivery.shipping_company || "Empresa de envío"],
-      ["Producto", product], ["Total a retirar", money(delivery.remuneration_amount)],
+      ["Cliente", delivery.client_name],
+      ["Producto", product],
+      ["Total por retirar", money(delivery.remuneration_amount)],
     ],
+    closing: "Recuerda solicitar la remuneración a la empresa de envío.",
   };
 }
 
 function renderEmail(job: Job) {
   const content = emailFor(job);
   const rows = content.details.map(([label, value]) =>
-    `<tr><td style="padding:8px 0;color:#806d77">${htmlEscape(label)}</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#493942">${htmlEscape(value)}</td></tr>`
+    `<tr><td style="padding:11px 0;color:#7d6571;font-size:14px;border-bottom:1px solid #f0dfe7">${htmlEscape(label)}</td><td style="padding:11px 0;text-align:right;font-weight:700;color:#432f39;font-size:14px;border-bottom:1px solid #f0dfe7">${htmlEscape(value)}</td></tr>`
   ).join("");
+  const text = [
+    "VARIEDADES YESKAR",
+    content.heading,
+    "",
+    content.message,
+    "",
+    ...content.details.map(([label, value]) => `${label}: ${value}`),
+    "",
+    content.closing,
+    "",
+    "Aviso automático del inventario de Variedades YesKar.",
+  ].join("\n");
+
   return {
     subject: content.subject,
-    html: `<!doctype html><html><body style="margin:0;background:#fff7fa;font-family:Arial,sans-serif;color:#493942"><div style="max-width:560px;margin:0 auto;padding:24px 14px"><div style="background:#ffffff;border:2px solid #eedde5;border-radius:22px;overflow:hidden"><div style="padding:22px;background:linear-gradient(135deg,#b94f78,#d96f91);color:white"><div style="font-size:34px">🐘</div><div style="font-size:12px;font-weight:800;letter-spacing:1px">VARIEDADES YESKAR</div><h1 style="margin:8px 0 0;font-size:27px">${htmlEscape(content.heading)}</h1></div><div style="padding:22px"><p style="font-size:17px;line-height:1.55;margin-top:0">${htmlEscape(content.message)}</p><table style="width:100%;border-collapse:collapse;border-top:1px solid #eedde5;border-bottom:1px solid #eedde5">${rows}</table><p style="margin:20px 0 0;color:#806d77;font-size:13px">Este aviso se generó automáticamente desde el inventario de Yesi.</p></div></div></div></body></html>`,
+    text,
+    html: `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${htmlEscape(content.subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#fff7fa;font-family:Arial,Helvetica,sans-serif;color:#432f39">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0">${htmlEscape(content.preheader)}</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fff7fa">
+    <tr>
+      <td align="center" style="padding:28px 12px">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #edd9e2;border-radius:20px;overflow:hidden;box-shadow:0 8px 28px rgba(133,64,94,.10)">
+          <tr>
+            <td style="padding:25px 26px;background:#c85b84;color:#ffffff">
+              <div style="font-size:32px;line-height:1" aria-hidden="true">&#128024;</div>
+              <div style="margin-top:12px;font-size:11px;font-weight:800;letter-spacing:1.4px">VARIEDADES YESKAR</div>
+              <h1 style="margin:8px 0 0;font-family:Georgia,serif;font-size:27px;line-height:1.2;color:#ffffff">${htmlEscape(content.heading)}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:25px 26px">
+              <p style="margin:0 0 18px;font-size:16px;line-height:1.6;color:#513d47">${htmlEscape(content.message)}</p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-top:1px solid #f0dfe7">${rows}</table>
+              <div style="margin-top:20px;padding:14px 16px;background:#fff0f5;border-left:4px solid #c85b84;border-radius:8px;font-size:15px;line-height:1.5;color:#513d47">${htmlEscape(content.closing)}</div>
+              <p style="margin:22px 0 0;color:#8c7580;font-size:12px;line-height:1.5">Este es un aviso automático del inventario de Variedades YesKar.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
   };
 }
 
@@ -146,12 +201,18 @@ Deno.serve(async (request: Request) => {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
+          "Content-Type": "application/json; charset=utf-8",
           "Idempotency-Key": `yeskar-${job.id}`,
+          "User-Agent": "VariedadesYesKar/1.0",
         },
         body: JSON.stringify({
           from: "Variedades YesKar <onboarding@resend.dev>",
-          to: [recipient], subject: email.subject, html: email.html,
+          to: [recipient],
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+          headers: { "X-Entity-Ref-ID": job.id },
+          tags: [{ name: "tipo", value: job.notification_type }],
         }),
       });
       const result = await response.json().catch(() => ({}));
