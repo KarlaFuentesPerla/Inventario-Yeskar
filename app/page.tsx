@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/purity -- IDs and timestamps are intentionally created inside user event handlers. */
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
@@ -18,6 +19,7 @@ const demoDeliveries:Delivery[] = [];
 
 const money=(n:number)=>new Intl.NumberFormat("es-SV",{style:"currency",currency:"USD"}).format(n||0);
 const fullDate=(s:string)=>new Intl.DateTimeFormat("es-SV",{weekday:"long",day:"numeric",month:"long"}).format(new Date(`${s}T12:00:00`));
+const createClientId=()=>new Date().getTime();
 
 export default function Home(){
   const [tab,setTab]=useState<Tab>("inicio");
@@ -41,16 +43,17 @@ export default function Home(){
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setUserId(data.session?.user.id??null);setAuthReady(true)});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{setUserId(session?.user.id??null);setBusinessId(null);setCloudReady(false);setAuthReady(true)});
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{setUserId(session?.user.id??null);setBusinessId(null);setCloudReady(false);if(!session){setProducts([]);setCategories([]);setReservations([]);setDeliveries([])}setAuthReady(true)});
     return()=>subscription.unsubscribe();
   },[]);
 
   useEffect(()=>{
-    if(!userId){setProducts([]);setCategories([]);setReservations([]);setDeliveries([]);return}
+    if(!userId)return;
     let cancelled=false;
     async function loadCloudData(){
       setCloudReady(false);
-      let {data:business,error:businessError}=await supabase.from("businesses").select("id").maybeSingle();
+      const {data:existingBusiness,error:businessError}=await supabase.from("businesses").select("id").maybeSingle();
+      let business=existingBusiness;
       if(businessError){setToast("No se pudo abrir el negocio");return}
       if(!business){
         const created=await supabase.from("businesses").insert({name:"Variedades YesKar",entrepreneur_name:"Yesi"}).select("id").single();
@@ -62,15 +65,16 @@ export default function Home(){
         supabase.from("categories").select("id,name").eq("business_id",id).eq("is_active",true).order("name"),
         supabase.from("products").select("id,client_id,category_id,name,quantity_on_hand,purchase_price,general_sale_price,family_sale_price").eq("business_id",id).eq("is_active",true).order("created_at",{ascending:false}),
         supabase.from("reservations").select("id,client_id,product_id,quantity,customer_type,reserved_at").eq("business_id",id).eq("status","reservada"),
-        supabase.from("deliveries").select("id,client_id,reservation_id,client_name,client_phone,address,shipping_mode,scheduled_for,company_handoff_at,shipping_company,remuneration_amount,collected_at,remuneration_withdrawn_at").eq("business_id",id)
+        supabase.from("deliveries").select("id,client_id,reservation_id,client_name,client_phone,address,shipping_mode,scheduled_for,company_handoff_at,shipping_company,remuneration_amount,collected_at,remuneration_withdrawn_at").eq("business_id",id).in("status",["programada","recogida"])
       ]);
       if(cancelled)return;
       const categoryRows=categoryResult.data??[],productRows=productResult.data??[],reservationRows=reservationResult.data??[],deliveryRows=deliveryResult.data??[];
       const categoryNameById=new Map(categoryRows.map(c=>[c.id,c.name]));
       const productClientByDbId=new Map(productRows.map(p=>[p.id,Number(p.client_id)]));
       const reservationClientByDbId=new Map(reservationRows.map(r=>[r.id,Number(r.client_id)]));
+      const deliveryClientByReservationDbId=new Map(deliveryRows.map(d=>[d.reservation_id,Number(d.client_id)]));
       const loadedProducts:Product[]=productRows.map(p=>({id:Number(p.client_id),name:p.name,category:categoryNameById.get(p.category_id)??"Sin categoría",quantity:p.quantity_on_hand,cost:Number(p.purchase_price),publicPrice:Number(p.general_sale_price),familyPrice:Number(p.family_sale_price),soldQuantity:0,salesRevenue:0}));
-      const loadedReservations:Reservation[]=reservationRows.map(r=>({id:Number(r.client_id),productId:productClientByDbId.get(r.product_id)??0,quantity:r.quantity,saleType:r.customer_type==="familia"?"Familia":"General",createdAt:String(r.reserved_at).slice(0,10)}));
+      const loadedReservations:Reservation[]=reservationRows.map(r=>({id:Number(r.client_id),productId:productClientByDbId.get(r.product_id)??0,quantity:r.quantity,saleType:r.customer_type==="familia"?"Familia":"General",createdAt:String(r.reserved_at).slice(0,10),deliveryId:deliveryClientByReservationDbId.get(r.id)}));
       const loadedDeliveries:Delivery[]=deliveryRows.map(d=>{const scheduled=new Date(d.scheduled_for),reservationClient=reservationClientByDbId.get(d.reservation_id),reservation=loadedReservations.find(r=>r.id===reservationClient),product=loadedProducts.find(p=>p.id===reservation?.productId),quantity=reservation?.quantity??0,saleType=reservation?.saleType??"General",price=product?(saleType==="Familia"?product.familyPrice:product.publicPrice)*quantity:0;return{id:Number(d.client_id),reservationId:reservationClient,productId:reservation?.productId,quantity,saleType,client:d.client_name,phone:d.client_phone??"",date:isoDate(scheduled),time:`${String(scheduled.getHours()).padStart(2,"0")}:${String(scheduled.getMinutes()).padStart(2,"0")}`,address:d.address??"",details:product?`${quantity} × ${product.name}`:"Entrega",price,mode:d.shipping_mode==="empresa"?"Empresa":"Propio",handoffDate:d.company_handoff_at?isoDate(new Date(d.company_handoff_at)):undefined,company:d.shipping_company??undefined,remuneration:d.remuneration_amount==null?undefined:Number(d.remuneration_amount),collectedAt:d.collected_at??undefined,remunerationWithdrawn:Boolean(d.remuneration_withdrawn_at)}});
       setBusinessId(id);setCategories(categoryRows.map(c=>c.name));setProducts(loadedProducts);setReservations(loadedReservations);setDeliveries(loadedDeliveries);setCloudReady(true);
     }
@@ -110,11 +114,11 @@ export default function Home(){
   const dayDeliveries=deliveries.filter(d=>d.date===selectedDate).sort((a,b)=>a.time.localeCompare(b.time));
   const payoutReminders=deliveries.filter(d=>d.mode==="Empresa"&&d.collectedAt&&d.remuneration&&!d.remunerationWithdrawn).map(d=>({...d,dueAt:new Date(new Date(d.collectedAt!).getTime()+48*60*60*1000)}));
 
-  function saveProduct(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);const newCategory=String(f.get("newCategory")||"").trim();const category=newCategory||String(f.get("category"));const values={name:String(f.get("name")),category,quantity:Number(f.get("quantity")),cost:Number(f.get("cost")),publicPrice:Number(f.get("publicPrice")),familyPrice:Number(f.get("familyPrice"))};if(newCategory&&!categories.includes(newCategory))setCategories(x=>[...x,newCategory].sort());if(editing){setProducts(x=>x.map(p=>p.id===editing.id?{...p,...values}:p));setToast("Producto actualizado")}else{setProducts(x=>[{id:Date.now(),soldQuantity:0,salesRevenue:0,...values},...x]);setToast("Producto agregado")};setEditing(null);setModal(null)}
+  function saveProduct(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);const newCategory=String(f.get("newCategory")||"").trim();const category=newCategory||String(f.get("category"));const values={name:String(f.get("name")),category,quantity:Number(f.get("quantity")),cost:Number(f.get("cost")),publicPrice:Number(f.get("publicPrice")),familyPrice:Number(f.get("familyPrice"))};if(newCategory&&!categories.includes(newCategory))setCategories(x=>[...x,newCategory].sort());if(editing){setProducts(x=>x.map(p=>p.id===editing.id?{...p,...values}:p));setToast("Producto actualizado")}else{setProducts(x=>[{id:createClientId(),soldQuantity:0,salesRevenue:0,...values},...x]);setToast("Producto agregado")};setEditing(null);setModal(null)}
   function saveDelivery(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget),productId=Number(f.get("productId")),quantity=Number(f.get("quantity")),saleType=String(f.get("saleType")) as SaleType,p=products.find(x=>x.id===productId);if(!p||quantity<1||quantity>availableFor(p))return;const reservationId=Date.now(),deliveryId=reservationId+1,price=(saleType==="Familia"?p.familyPrice:p.publicPrice)*quantity,mode=String(f.get("mode")) as DeliveryMode,date=String(mode==="Empresa"?f.get("pickupDate"):f.get("date")),time=String(mode==="Empresa"?f.get("pickupTime"):f.get("time"));setReservations(x=>[...x,{id:reservationId,productId,quantity,saleType,createdAt:isoDate(now),deliveryId}]);setDeliveries(x=>[...x,{id:deliveryId,reservationId,productId,quantity,saleType,mode,client:String(f.get("client")),phone:String(f.get("phone")),date,time,address:String(f.get("address")),details:`${quantity} × ${p.name}`,price,handoffDate:mode==="Empresa"?String(f.get("handoffDate")):undefined,company:mode==="Empresa"?String(f.get("company")):undefined,remuneration:mode==="Empresa"?Number(f.get("remuneration")):0}]);setSelectedDate(date);setModal(null);setToast("Entrega agendada y producto reservado")}
   const reservedFor=(id:number)=>reservations.filter(r=>r.productId===id).reduce((s,r)=>s+r.quantity,0);
   const availableFor=(p:Product)=>Math.max(0,p.quantity-p.soldQuantity-reservedFor(p.id));
-  async function recordSale(product:Product,quantity:number,saleType:SaleType,clientId=Date.now()){
+  async function recordSale(product:Product,quantity:number,saleType:SaleType,clientId=createClientId()){
     if(!businessId)return;
     const productRow=await supabase.from("products").select("id").eq("business_id",businessId).eq("client_id",product.id).single();
     if(productRow.error)return setToast("La venta se reflejará al volver a intentarlo");
