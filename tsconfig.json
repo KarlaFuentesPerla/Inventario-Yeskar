@@ -24,11 +24,11 @@
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "supabase", "worker", "db", "examples", "build"]
 }
