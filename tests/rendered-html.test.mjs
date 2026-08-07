@@ -41,6 +41,9 @@ test("keeps cloud persistence and mobile-first controls in the source", async ()
   assert.match(page, /supabase\.from\("categories"\)/);
   assert.match(page, /supabase\.from\("reservations"\)\.upsert/);
   assert.match(page, /supabase\.from\("deliveries"\)\.upsert/);
+  assert.match(page, /name="receivedQuantity"/);
+  assert.match(page, /quantity:p\.quantity\+received/);
+  assert.match(page, /Las unidades actuales no se modifican/);
   assert.match(page, /deliveryClientByReservationDbId/);
   assert.match(page, /\.in\("status",\["programada","recogida"\]\)/);
   assert.match(page, /type="number"/);
